@@ -25,9 +25,13 @@ public class PlayerController3D : MonoBehaviour
     private float pitch;
     private bool isGrounded;
 
+    // 🔥 ДОБАВИЛИ
+    private Animator animator;
+
     private void Awake()
     {
         controller = GetComponent<CharacterController>();
+        animator = GetComponent<Animator>();
 
         if (cameraPivot == null && Camera.main != null)
         {
@@ -79,10 +83,7 @@ public class PlayerController3D : MonoBehaviour
 
         transform.Rotate(Vector3.up * mouseX);
 
-        if (cameraPivot == null)
-        {
-            return;
-        }
+        if (cameraPivot == null) return;
 
         pitch -= mouseY;
         pitch = Mathf.Clamp(pitch, minLookAngle, maxLookAngle);
@@ -101,6 +102,14 @@ public class PlayerController3D : MonoBehaviour
 
         controller.Move(move * Time.deltaTime);
 
+
+        bool isMoving = inputDirection.magnitude > 0.1f;
+
+        if (animator != null)
+        {
+            animator.SetBool("isMoving", isMoving);
+        }
+
         if (Input.GetButtonDown("Jump") && isGrounded)
         {
             velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
@@ -111,13 +120,9 @@ public class PlayerController3D : MonoBehaviour
         controller.Move(velocity * Time.deltaTime);
     }
 
-
     private void OnDrawGizmosSelected()
     {
-        if (groundCheckPoint == null)
-        {
-            return;
-        }
+        if (groundCheckPoint == null) return;
 
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(groundCheckPoint.position, groundCheckRadius);
