@@ -72,7 +72,7 @@ public class PlayerController3Dv2 : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.R))
+        if (Input.GetKeyDown(KeyCode.Y))
             EnableRagdoll();
 
         if (Input.GetKeyDown(KeyCode.T))
