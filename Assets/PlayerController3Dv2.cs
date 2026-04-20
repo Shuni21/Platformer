@@ -3,22 +3,22 @@
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController3Dv2 : MonoBehaviour
 {
-    [Header("Movement")]
+    [Header("Movement Settings")]
     [SerializeField] private float moveSpeed = 6f;
     [SerializeField] private float airControl = 0.5f;
     [SerializeField] private float jumpHeight = 1.8f;
     [SerializeField] private float gravity = -25f;
 
-    [Header("Advanced Jump")]
+    [Header("Jump Physics (Feel)")]
     [SerializeField] private float coyoteTime = 0.15f;
     [SerializeField] private float jumpBufferTime = 0.15f;
     [SerializeField] private float fallMultiplier = 2.5f;
     [SerializeField] private float lowJumpMultiplier = 2f;
 
-    [Header("Ground Check")]
-    [SerializeField] private Transform groundCheckPoint;
+    [Header("Ground Check (Automatic)")]
     [SerializeField] private float groundCheckRadius = 0.25f;
-    [SerializeField] private float groundCheckDistance = 0.4f;
+    [SerializeField] private float groundCheckDistance = 0.3f;
+    [SerializeField] private float groundOffset = 0.1f;
     [SerializeField] private LayerMask groundMask = ~0;
 
     [Header("Mouse Look")]
@@ -29,31 +29,35 @@ public class PlayerController3Dv2 : MonoBehaviour
     [SerializeField] private float maxLookAngle = 80f;
     [SerializeField] private float lookSmooth = 12f;
 
+    // Ссылки на компоненты
     private CharacterController controller;
     private Animator animator;
+    private Rigidbody[] ragdollBodies;
+    private Collider[] ragdollColliders;
 
-    private Vector3 velocity;
+    // Состояние движения
+    private Vector3 verticalVelocity;
+    private Vector3 platformVelocity; // Дополнительная скорость от платформ
     private float pitch;
     private float currentPitch;
     private bool isGrounded;
-    private RaycastHit groundHit;
+    private bool isRagdoll = false;
 
+    // Таймеры
     private float coyoteCounter;
     private float jumpBufferCounter;
 
-    // RAGDOLL
-    private Rigidbody[] ragdollBodies;
-    private Collider[] ragdollColliders;
-    private bool isRagdoll = false;
-
     private void Awake()
     {
+        // Инициализация компонентов
         controller = GetComponent<CharacterController>();
         animator = GetComponent<Animator>();
 
+        // Сбор костей Ragdoll
         ragdollBodies = GetComponentsInChildren<Rigidbody>();
         ragdollColliders = GetComponentsInChildren<Collider>();
 
+        // Настройка камеры, если не задана вручную
         if (cameraPivot == null && Camera.main != null)
         {
             cameraPivot = Camera.main.transform.parent != null
@@ -64,20 +68,21 @@ public class PlayerController3Dv2 : MonoBehaviour
 
     private void Start()
     {
+        // Прячем курсор
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
 
+        // Выключаем Ragdoll при старте
         SetRagdoll(false);
     }
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.Y))
-            EnableRagdoll();
+        // Проверка клавиш Ragdoll
+        if (Input.GetKeyDown(KeyCode.Y)) EnableRagdoll();
+        if (Input.GetKeyDown(KeyCode.T)) DisableRagdoll();
 
-        if (Input.GetKeyDown(KeyCode.T))
-            DisableRagdoll();
-
+        // Если мы "кукла", управление не работает
         if (isRagdoll) return;
 
         UpdateGroundedState();
@@ -86,48 +91,77 @@ public class PlayerController3Dv2 : MonoBehaviour
         HandleMovement();
     }
 
-    // ---------------- GROUND CHECK ----------------
+    // --- ПРОВЕРКА ЗЕМЛИ И ПЛАТФОРМ ---
     private void UpdateGroundedState()
     {
-        Vector3 origin = groundCheckPoint.position;
+        Vector3 origin = GetGroundCheckPosition();
+        RaycastHit hit;
 
+        // Используем SphereCast для более надежной проверки
         isGrounded = Physics.SphereCast(
             origin,
             groundCheckRadius,
             Vector3.down,
-            out groundHit,
+            out hit,
             groundCheckDistance,
             groundMask,
             QueryTriggerInteraction.Ignore
         );
 
-        if (isGrounded && velocity.y < 0f)
+        if (isGrounded)
         {
-            velocity.y = -2f;
+            // Сброс вертикальной скорости при приземлении
+            if (verticalVelocity.y < 0f)
+            {
+                verticalVelocity.y = -2f;
+            }
+
+            // ПРОВЕРКА ПОДВИЖНОЙ ПЛАТФОРМЫ
+            MovingPlatform platform = hit.collider.GetComponent<MovingPlatform>();
+            if (platform != null)
+            {
+                platformVelocity = platform.GetVelocity();
+            }
+            else
+            {
+                platformVelocity = Vector3.zero;
+            }
+        }
+        else
+        {
+            // Плавное затухание скорости платформы в прыжке
+            platformVelocity = Vector3.Lerp(platformVelocity, Vector3.zero, Time.deltaTime * 2f);
         }
     }
 
-    // ---------------- LOOK ----------------
+    private Vector3 GetGroundCheckPosition()
+    {
+        // Автоматически вычисляем позицию стоп персонажа
+        return transform.position + controller.center + (Vector3.down * (controller.height / 2f)) + (Vector3.up * groundOffset);
+    }
+
+    // --- ПОВОРОТ КАМЕРЫ ---
     private void HandleLook()
     {
         float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity * Time.deltaTime;
         float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity * Time.deltaTime;
 
+        // Вращение тела влево-вправо
         if (playerBody != null)
             playerBody.Rotate(Vector3.up * mouseX);
         else
             transform.Rotate(Vector3.up * mouseX);
 
+        // Вращение головы/камеры вверх-вниз
         pitch -= mouseY;
         pitch = Mathf.Clamp(pitch, minLookAngle, maxLookAngle);
-
         currentPitch = Mathf.Lerp(currentPitch, pitch, lookSmooth * Time.deltaTime);
 
         if (cameraPivot != null)
             cameraPivot.localRotation = Quaternion.Euler(currentPitch, 0f, 0f);
     }
 
-    // ---------------- JUMP TIMERS ----------------
+    // --- ТАЙМЕРЫ ПРЫЖКА ---
     private void HandleJumpTimers()
     {
         if (isGrounded)
@@ -141,50 +175,67 @@ public class PlayerController3Dv2 : MonoBehaviour
             jumpBufferCounter -= Time.deltaTime;
     }
 
-    // ---------------- MOVEMENT ----------------
+    // --- ПЕРЕМЕЩЕНИЕ И АНИМАЦИИ ---
     private void HandleMovement()
     {
+        // Горизонтальный ввод (WASD)
         float horizontal = Input.GetAxisRaw("Horizontal");
         float vertical = Input.GetAxisRaw("Vertical");
-
         Vector3 inputDir = (transform.right * horizontal + transform.forward * vertical).normalized;
 
         float control = isGrounded ? 1f : airControl;
         Vector3 move = inputDir * moveSpeed * control;
 
-        controller.Move(move * Time.deltaTime);
+        // Расчет прыжка и гравитации
+        ApplyJumpAndGravity();
 
-        bool isMoving = inputDir.magnitude > 0.1f;
+        // ФИНАЛЬНОЕ ДВИЖЕНИЕ (Сумма всех векторов)
+        Vector3 finalMotion = move + verticalVelocity + platformVelocity;
+        controller.Move(finalMotion * Time.deltaTime);
 
+        // Обновление аниматора
         if (animator != null)
-            animator.SetBool("isMoving", isMoving);
-
-        // ---------------- JUMP ----------------
-        if (jumpBufferCounter > 0f && coyoteCounter > 0f)
         {
-            velocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
-            jumpBufferCounter = 0f;
-            coyoteCounter = 0f;
+            animator.SetBool("isMoving", inputDir.magnitude > 0.1f);
+            animator.SetBool("isGrounded", isGrounded);
+            animator.SetFloat("yVelocity", verticalVelocity.y);
         }
-
-        // ---------------- GRAVITY IMPROVED ----------------
-        if (velocity.y < 0)
-        {
-            velocity.y += gravity * fallMultiplier * Time.deltaTime;
-        }
-        else if (velocity.y > 0 && !Input.GetButton("Jump"))
-        {
-            velocity.y += gravity * lowJumpMultiplier * Time.deltaTime;
-        }
-        else
-        {
-            velocity.y += gravity * Time.deltaTime;
-        }
-
-        controller.Move(velocity * Time.deltaTime);
     }
 
-    // ---------------- RAGDOLL ----------------
+    private void ApplyJumpAndGravity()
+    {
+        // Прыгаем, только если есть заряд Coyote и Buffer
+        if (jumpBufferCounter > 0f && coyoteCounter > 0f)
+        {
+            verticalVelocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
+
+            // Сброс таймеров
+            jumpBufferCounter = 0f;
+            coyoteCounter = 0f;
+
+            // Триггер для мгновенной анимации прыжка
+            if (animator != null)
+            {
+                animator.SetTrigger("JumpTrigger");
+            }
+        }
+
+        // Физика падения
+        if (verticalVelocity.y < 0) // Мы падаем вниз
+        {
+            verticalVelocity.y += gravity * fallMultiplier * Time.deltaTime;
+        }
+        else if (verticalVelocity.y > 0 && !Input.GetButton("Jump")) // Отпустили пробел (короткий прыжок)
+        {
+            verticalVelocity.y += gravity * lowJumpMultiplier * Time.deltaTime;
+        }
+        else // Обычный полет вверх
+        {
+            verticalVelocity.y += gravity * Time.deltaTime;
+        }
+    }
+
+    // --- СИСТЕМА RAGDOLL ---
     private void EnableRagdoll()
     {
         isRagdoll = true;
@@ -195,7 +246,7 @@ public class PlayerController3Dv2 : MonoBehaviour
     {
         isRagdoll = false;
         SetRagdoll(false);
-
+        // Выпрямляем объект после падения
         transform.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
     }
 
@@ -207,7 +258,6 @@ public class PlayerController3Dv2 : MonoBehaviour
             {
                 rb.isKinematic = !state;
                 rb.interpolation = RigidbodyInterpolation.Interpolate;
-                rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
             }
         }
 
@@ -218,17 +268,20 @@ public class PlayerController3Dv2 : MonoBehaviour
         }
 
         controller.enabled = !state;
-
-        if (animator != null)
-            animator.enabled = !state;
+        if (animator != null) animator.enabled = !state;
     }
 
-    // ---------------- DEBUG ----------------
+    // --- ОТЛАДКА В РЕДАКТОРЕ ---
     private void OnDrawGizmosSelected()
     {
-        if (groundCheckPoint == null) return;
+        if (controller == null) controller = GetComponent<CharacterController>();
+
+        Vector3 origin = GetGroundCheckPosition();
+
+        Gizmos.color = isGrounded ? Color.green : Color.red;
+        Gizmos.DrawWireSphere(origin, groundCheckRadius);
 
         Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(groundCheckPoint.position, groundCheckRadius);
+        Gizmos.DrawLine(origin, origin + Vector3.down * groundCheckDistance);
     }
 }
